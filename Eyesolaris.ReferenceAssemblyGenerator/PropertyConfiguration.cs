@@ -1,4 +1,4 @@
-﻿namespace Eyesolaris.ReferenceAssemblyFilter
+﻿namespace Eyesolaris.ReferenceAssemblyGenerator
 {
     internal class PropertyConfiguration
     {

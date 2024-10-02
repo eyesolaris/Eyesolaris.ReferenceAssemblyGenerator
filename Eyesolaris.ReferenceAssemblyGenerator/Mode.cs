@@ -1,6 +1,6 @@
 ﻿using System.Reflection;
 
-namespace Eyesolaris.ReferenceAssemblyFilter
+namespace Eyesolaris.ReferenceAssemblyGenerator
 {
     internal enum Mode
     {

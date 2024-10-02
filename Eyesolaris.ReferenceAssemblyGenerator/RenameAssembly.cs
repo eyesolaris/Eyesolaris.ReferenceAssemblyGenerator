@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Text.Json.Serialization;
 
-namespace Eyesolaris.ReferenceAssemblyFilter
+namespace Eyesolaris.ReferenceAssemblyGenerator
 {
     internal class RenameAssembly : IJsonOnDeserialized
     {

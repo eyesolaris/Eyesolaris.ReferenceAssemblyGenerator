@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Text.Json.Serialization;
 
-namespace Eyesolaris.ReferenceAssemblyFilter
+namespace Eyesolaris.ReferenceAssemblyGenerator
 {
     internal abstract class CompexEntityConfiguration : IJsonOnDeserialized
     {
@@ -11,7 +11,7 @@ namespace Eyesolaris.ReferenceAssemblyFilter
 
         public void OnDeserialized()
         {
-            if (Mode < ReferenceAssemblyFilter.Mode.Leave || Mode > ReferenceAssemblyFilter.Mode.Remove)
+            if (Mode < ReferenceAssemblyGenerator.Mode.Leave || Mode > ReferenceAssemblyGenerator.Mode.Remove)
             {
                 throw new InvalidOperationException("Mode is invalid");
             }

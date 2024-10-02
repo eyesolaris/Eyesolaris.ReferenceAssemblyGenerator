@@ -6,7 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 
-namespace Eyesolaris.ReferenceAssemblyFilter
+namespace Eyesolaris.ReferenceAssemblyGenerator
 {
     internal class Program
     {
