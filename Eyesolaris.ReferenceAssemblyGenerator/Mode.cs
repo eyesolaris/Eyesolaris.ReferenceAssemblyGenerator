@@ -4,7 +4,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
 {
     internal enum Mode
     {
-        Leave,
+        Keep,
         Remove
     }
 }

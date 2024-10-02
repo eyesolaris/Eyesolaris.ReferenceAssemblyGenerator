@@ -11,7 +11,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
 
         public void OnDeserialized()
         {
-            if (Mode < ReferenceAssemblyGenerator.Mode.Leave || Mode > ReferenceAssemblyGenerator.Mode.Remove)
+            if (Mode < ReferenceAssemblyGenerator.Mode.Keep || Mode > ReferenceAssemblyGenerator.Mode.Remove)
             {
                 throw new InvalidOperationException("Mode is invalid");
             }

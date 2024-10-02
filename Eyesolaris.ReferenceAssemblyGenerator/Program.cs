@@ -496,7 +496,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                 // Remove all in a list
                 namesToRemove = new HashSet<string>(list);
             }
-            else if (listMode == Mode.Leave)
+            else if (listMode == Mode.Keep)
             {
                 // Remove all except in a list
                 namesToRemove = new HashSet<string>(getAllNames());
