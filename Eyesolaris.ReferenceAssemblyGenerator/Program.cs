@@ -2,6 +2,7 @@
 using dnlib.DotNet.Emit;
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -87,69 +88,80 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
         {
             bool removeObsolete = config?.RemoveObsolete ?? Configuration.DEFAULT_REMOVE_OBSOLETE;
             // Populate sets
-            HashSet<string> methodsToRemove;
-            HashSet<string> propertiesToRemove;
-            HashSet<string> fieldsToRemove;
-            HashSet<string> eventsToRemove;
-            HashSet<string> interfacesToRemove;
-            HashSet<string> implMethodsToRemove;
+            Dictionary<string, bool> methodsToRemove;
+            IReadOnlyDictionary<string, bool> propertiesToRemove;
+            IReadOnlyDictionary<string, bool> fieldsToRemove;
+            IReadOnlyDictionary<string, bool> eventsToRemove;
+            IReadOnlyDictionary<string, bool> interfacesToRemove;
+            Dictionary<string, bool> implMethodsToRemove;
+            HashSet<string> removedMethods = [];
+            HashSet<string> removedProperties = [];
+            HashSet<string> removedFields = [];
+            HashSet<string> removedEvents = [];
+            HashSet<string> removedInterfaces = [];
             if (config is not null)
             {
-                methodsToRemove = CreateSetForRemoving(
+                methodsToRemove = CreateDictForRemoving(
                     () => type.Methods.Select(m => m.FullName),
                     config.Methods,
                     config.Mode,
                     type.FullName);
-                propertiesToRemove = CreateSetForRemoving(
+                propertiesToRemove = CreateDictForRemoving(
                     () => type.Properties.Select(p => p.FullName),
                     config.Properties,
                     config.Mode,
                     type.FullName);
-                fieldsToRemove = CreateSetForRemoving(
+                fieldsToRemove = CreateDictForRemoving(
                     () => type.Fields.Select(f => f.FullName),
                     config.Fields,
                     config.Mode,
                     type.FullName);
-                eventsToRemove = CreateSetForRemoving(
+                eventsToRemove = CreateDictForRemoving(
                     () => type.Events.Select(e => e.FullName),
                     config.Events,
                     config.Mode,
                     type.FullName);
-                interfacesToRemove = CreateSetForRemoving(
+                interfacesToRemove = CreateDictForRemoving(
                     () => type.Interfaces.Select(i => i.Interface.FullName),
                     config.Interfaces,
                     config.Mode,
                     null);
-                implMethodsToRemove = new();
-                foreach (var iface in type.Interfaces.Select(i => i.Interface).Where(i => interfacesToRemove.Contains(i.FullName)))
+                var implMethodsToRemoveDict = new Dictionary<string, bool>();
+                implMethodsToRemove = implMethodsToRemoveDict;
+                foreach (var iface in type.Interfaces.Select(i => i.Interface).Where(i => interfacesToRemove.ContainsKey(i.FullName)))
                 {
                     foreach (MethodDef method in iface.ResolveTypeDefThrow().Methods)
                     {
-                        implMethodsToRemove.Add(GetFullMemberName(iface.FullName, method.FullName));
+                        implMethodsToRemoveDict.Add(GetFullMemberName(iface.FullName, method.FullName), interfacesToRemove[iface.FullName]);
                     }
                 }
             }
             else
             {
-                methodsToRemove = new();
-                implMethodsToRemove = new();
-                HashSet<string> emptySet = [];
-                propertiesToRemove = emptySet;
-                fieldsToRemove = emptySet;
-                eventsToRemove = emptySet;
-                interfacesToRemove = emptySet;
+                ImmutableDictionary<string, bool> emptyDict = ImmutableDictionary<string, bool>.Empty;
+                methodsToRemove = new Dictionary<string, bool>();
+                implMethodsToRemove = new Dictionary<string, bool>();
+                propertiesToRemove = emptyDict;
+                fieldsToRemove = emptyDict;
+                eventsToRemove = emptyDict;
+                interfacesToRemove = emptyDict;
             }
 
-            static void AddInterfaceMethodsToSet(HashSet<string> methods, InterfaceImpl iface)
+            static void CheckInterfaceMethodsToRemoval(InterfaceImpl iface, IDictionary<string, bool> methods, IDictionary<string, bool> implMethodsToRemove)
             {
                 TypeDef ifaceDef = iface.Interface.ResolveTypeDefThrow();
                 foreach (MethodDef method in ifaceDef.Methods)
                 {
-                    methods.Add(method.FullName);
+                    if (!methods.TryGetValue(method.FullName, out _))
+                    {
+                        // Check a method for sure removal if and only if this behavior is not overriden already
+                        methods[method.FullName] = true;
+                    }
+                    implMethodsToRemove[method.FullName] = true;
                 }
                 foreach (InterfaceImpl iface2 in ifaceDef.Interfaces)
                 {
-                    AddInterfaceMethodsToSet(methods, iface2);
+                    CheckInterfaceMethodsToRemoval(iface2, methods, implMethodsToRemove);
                 }
             }
 
@@ -158,20 +170,20 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
             for (int j = 0; j < interfaces.Count; j++)
             {
                 InterfaceImpl iface = interfaces[j];
-                if (interfacesToRemove.Contains(iface.Interface.FullName)
+                if (interfacesToRemove.ContainsKey(iface.Interface.FullName)
                     || removeObsolete && IsObsolete(iface.Interface))
                 {
-                    AddInterfaceMethodsToSet(implMethodsToRemove, iface);
+                    CheckInterfaceMethodsToRemoval(iface, methodsToRemove, implMethodsToRemove);
                     interfaces.RemoveAt(j);
                     j--;
                 }
             }
 
-            static bool AllInnerTypesOk(IReadOnlySet<string> typesToRemove, IEnumerable<TypeSig> innerTypes)
+            static bool AllSignatureTypesOk(IReadOnlySet<string> removedTypes, IEnumerable<TypeSig> innerTypes)
             {
                 foreach (TypeSig type in innerTypes)
                 {
-                    if (type is null || typesToRemove.Contains(type.FullName))
+                    if (type is null || removedTypes.Contains(type.FullName))
                     {
                         return false;
                     }
@@ -186,7 +198,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                         {
                             case ElementType.FnPtr:
                                 FnPtrSig fn = (FnPtrSig)type;
-                                if (!AllInnerTypesOk(typesToRemove, fn.MethodSig.Params.Prepend(fn.MethodSig.RetType)))
+                                if (!AllSignatureTypesOk(removedTypes, fn.MethodSig.Params.Prepend(fn.MethodSig.RetType)))
                                 {
                                     return false;
                                 }
@@ -194,12 +206,16 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                         }
                         continue;
                     }
+                    if (removedTypes.Contains(typeScope.FullName))
+                    {
+                        return false;
+                    }
                     TypeDef typeDef = typeScope.ResolveTypeDefThrow();
                     if (!(typeDef.IsPublic || typeDef.IsNestedPublic || typeDef.IsNestedFamily || typeDef.IsNestedFamilyOrAssembly))
                     {
                         return false;
                     }
-                    if (!AllInnerTypesOk(typesToRemove, typeDef.GenericParameters.SelectMany(p => p.GenericParamConstraints).Select(c => c.Constraint.ToTypeSig())))
+                    if (!AllSignatureTypesOk(removedTypes, typeDef.GenericParameters.SelectMany(p => p.GenericParamConstraints).Select(c => c.Constraint.ToTypeSig())))
                     {
                         return false;
                     }
@@ -207,13 +223,14 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                 return true;
             }
 
-            static bool MethodSignatureOk(IReadOnlySet<string> typesToRemove, MethodDef method)
+            static bool MethodSignatureOk(IReadOnlySet<string> removedTypes, MethodDef method)
             {
-                return AllInnerTypesOk(
-                    typesToRemove,
+                return AllSignatureTypesOk(
+                    removedTypes,
                     method.Parameters
                     .Where(p => !p.IsHiddenThisParameter)
-                    .Select(p => p.Type));
+                    .Select(p => p.Type)
+                    .Prepend(method.ReturnType));
             }
 
             // Process methods
@@ -226,7 +243,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                 for (int o = 0; o < overrides.Count; o++)
                 {
                     MethodOverride @override = overrides[o];
-                    if (implMethodsToRemove.Contains(@override.MethodDeclaration.FullName))
+                    if (implMethodsToRemove.ContainsKey(@override.MethodDeclaration.FullName))
                     {
                         overrides.RemoveAt(o);
                         o--;
@@ -236,14 +253,14 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                 bool nonPublicApi = !(method.IsPublic || method.IsFamilyOrAssembly || method.IsFamily)
                     && !method.HasOverrides;
                 bool hasRemovedTypesFromSignature = !MethodSignatureOk(removedTypes, method);
-                bool removalRequestedByUser = methodsToRemove.Contains(method.FullName);
+                bool removalRequestedByUser = methodsToRemove.ContainsKey(method.FullName);
                 bool obsoleteToRemove = removeObsolete && IsObsolete(method);
                 if (nonPublicApi
                     || hasRemovedTypesFromSignature
                     || removalRequestedByUser
                     || obsoleteToRemove)
                 {
-                    methodsToRemove.Add(method.FullName);
+                    removedMethods.Add(method.FullName);
                     methods.RemoveAt(c);
                     c--;
                 }
@@ -258,7 +275,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
             {
                 FieldDef field = fields[p];
                 if (!(field.IsPublic || field.IsFamily || field.IsFamilyOrAssembly)
-                    || fieldsToRemove.Contains(field.FullName)
+                    || fieldsToRemove.ContainsKey(field.FullName)
                     || removedTypes.Contains(field.FieldType.FullName)
                     || removeObsolete && IsObsolete(field))
                 {
@@ -267,7 +284,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                 }
             }
 
-            static void RemoveUnneededMethods(HashSet<string> removedMethods, IList<MethodDef> methods)
+            static void RemoveUnneededMethods(IReadOnlySet<string> removedMethods, IList<MethodDef> methods)
             {
                 for (int m = 0; m < methods.Count; m++)
                 {
@@ -307,16 +324,16 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                         }
                     }
                 }
-                if (methodsToRemove.Contains(@event.AddMethod.FullName))
+                if (methodsToRemove.ContainsKey(@event.AddMethod.FullName))
                 {
                     @event.AddMethod = null;
                 }
-                if (methodsToRemove.Contains(@event.RemoveMethod.FullName))
+                if (methodsToRemove.ContainsKey(@event.RemoveMethod.FullName))
                 {
                     @event.RemoveMethod = null;
                 }
-                RemoveUnneededMethods(methodsToRemove, @event.OtherMethods);
-                if (@event.IsEmpty || eventsToRemove.Contains(@event.FullName)
+                RemoveUnneededMethods(removedMethods, @event.OtherMethods);
+                if (@event.IsEmpty || eventsToRemove.ContainsKey(@event.FullName)
                     || removeObsolete && IsObsolete(@event))
                 {
                     MethodDef?[] propertyMethods = @event.OtherMethods.Append(@event.AddMethod).Append(@event.RemoveMethod).ToArray();
@@ -368,10 +385,10 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                         }
                     }
                 }
-                RemoveUnneededMethods(methodsToRemove, property.SetMethods);
-                RemoveUnneededMethods(methodsToRemove, property.GetMethods);
-                RemoveUnneededMethods(methodsToRemove, property.OtherMethods);
-                if (property.IsEmpty || propertiesToRemove.Contains(property.FullName)
+                RemoveUnneededMethods(removedMethods, property.SetMethods);
+                RemoveUnneededMethods(removedMethods, property.GetMethods);
+                RemoveUnneededMethods(removedMethods, property.OtherMethods);
+                if (property.IsEmpty || propertiesToRemove.ContainsKey(property.FullName)
                     || removeObsolete && IsObsolete(property))
                 {
                     MethodDef[] propertyMethods = property.GetMethods.Concat(property.SetMethods).Concat(property.OtherMethods).ToArray();
@@ -388,11 +405,11 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
         private static void ProcessInnerTypes(TypeDef type, IReadOnlyDictionary<string, TypeConfiguration>? config, ISet<string> removedTypes, bool? removeObsolete)
         {
             bool removeObsoleteValue = removeObsolete ?? Configuration.DEFAULT_REMOVE_OBSOLETE;
-            HashSet<string> typesToRemove;
+            Dictionary<string, bool> typesToRemove;
             TypeConfiguration? typeConfig = null;
             if (config?.TryGetValue(type.FullName, out typeConfig) ?? false)
             {
-                typesToRemove = CreateSetForRemoving(
+                typesToRemove = CreateDictForRemoving(
                     () => type.NestedTypes.Select(t => GetFullNestedClassName(type.FullName, t.FullName)),
                     typeConfig.InnerTypes,
                     typeConfig.Mode,
@@ -412,7 +429,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                     removedTypes,
                     typeConfig?.RemoveObsolete ?? removeObsoleteValue); // Use a base removeObsolete, if typeConfig.RemoveObsolete is not overriding a parent value
                 if (!(nestedType.IsNestedPublic || nestedType.IsNestedFamily || nestedType.IsNestedFamilyOrAssembly)
-                    || typesToRemove.Contains(nestedType.FullName)
+                    || typesToRemove.ContainsKey(nestedType.FullName)
                     || removeObsoleteValue && IsObsolete(nestedType))
                 {
                     removedTypes.Add(nestedType.FullName);
@@ -442,24 +459,15 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
             bool removeObsoleteValue = config.RemoveObsolete ?? Configuration.DEFAULT_REMOVE_OBSOLETE;
             foreach (var module in assembly.Modules)
             {
-                HashSet<string> typesToRemove = CreateSetForRemoving(
+                Dictionary<string, bool> typesToRemove = CreateDictForRemoving(
                     () => module.Types.Select(t => t.FullName),
                     config.Types,
                     config.Mode,
                     null);
+                HashSet<string> removedTypes = new();
                 IList<TypeDef> types = module.Types;
 
-                // First pass: process all inner types
-                for (int i = 0; i < types.Count; i++)
-                {
-                    TypeDef type = types[i];
-                    ProcessInnerTypes(
-                        type,
-                        (IReadOnlyDictionary<string, TypeConfiguration>)config.TypeConfiguration,
-                        typesToRemove,
-                        config.RemoveObsolete);
-                }
-                // Second pass: process remaining members
+                // First pass: process all types, including inner types
                 for (int i = 0; i < types.Count; i++)
                 {
                     TypeDef type = types[i];
@@ -469,24 +477,36 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                     {
                         if (((type.IsNotPublic
                             || type.IsNested && !(type.IsNestedPublic || type.IsNestedFamily || type.IsNestedFamilyOrAssembly))
-                            || typesToRemove.Contains(type.FullName))
+                            || typesToRemove.ContainsKey(type.FullName))
                             && !IsAttribute(type)
-                            || removeObsoleteValue && IsObsolete(type))
+                            || removeObsoleteValue && IsObsolete(type)
+                            || typesToRemove.TryGetValue(type.FullName, out bool surelyRemove) && surelyRemove)
                         {
-                            typesToRemove.Add(type.FullName);
+                            removedTypes.Add(type.FullName);
                             types.RemoveAt(i);
                             i--;
                             continue;
                         }
                     }
-                    ExecuteStripping(type, typeConfig, typesToRemove);
+                    ProcessInnerTypes(
+                        type,
+                        (IReadOnlyDictionary<string, TypeConfiguration>)config.TypeConfiguration,
+                        removedTypes,
+                        config.RemoveObsolete);
+                }
+                // Second pass: process remaining members
+                for (int i = 0; i < types.Count; i++)
+                {
+                    TypeDef type = types[i];
+                    config.TypeConfiguration.TryGetValue(type.FullName, out TypeConfiguration? typeConfig);
+                    ExecuteStripping(type, typeConfig, removedTypes);
                 }
             }
         }
 
-        private static HashSet<string> CreateSetForRemoving(Func<IEnumerable<string>> getAllNames, IEnumerable<string> list, Mode? listMode, string? fullTypeName)
+        private static Dictionary<string, bool> CreateDictForRemoving(Func<IEnumerable<string>> getAllNames, IEnumerable<string> list, Mode? listMode, string? fullTypeName)
         {
-            HashSet<string> namesToRemove;
+            Dictionary<string, bool> namesToRemove;
             if (fullTypeName is not null)
             {
                 list = list.Select(n => GetFullMemberName(fullTypeName, n));
@@ -494,13 +514,13 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
             if (listMode == Mode.Remove)
             {
                 // Remove all in a list
-                namesToRemove = new HashSet<string>(list);
+                namesToRemove = new Dictionary<string, bool>(list.Select(name => new KeyValuePair<string, bool>(name, true)));
             }
             else if (listMode == Mode.Keep)
             {
                 // Remove all except in a list
-                namesToRemove = new HashSet<string>(getAllNames());
-                namesToRemove.ExceptWith(list);
+                namesToRemove = new Dictionary<string, bool>(getAllNames().Select(name => new KeyValuePair<string, bool>(name, false))
+                    .Except(list.Select(name => KeyValuePair.Create(name, false))));
             }
             else
             {
