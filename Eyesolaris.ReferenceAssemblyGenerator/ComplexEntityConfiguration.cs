@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Eyesolaris.ReferenceAssemblyGenerator
 {
-    internal abstract class CompexEntityConfiguration : IJsonOnDeserialized
+    internal abstract class ComplexEntityConfiguration : IJsonOnDeserialized
     {
         [JsonConverter(typeof(JsonStringEnumConverter<Mode>))]
         public Mode? Mode { get; set; }
