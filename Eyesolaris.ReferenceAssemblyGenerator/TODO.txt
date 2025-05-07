@@ -1,3 +1,3 @@
 ﻿1. Fix a bug: when trying to remove an interface implementation with some base interfaces itself, some traces
 of interface to remove are left, AND some information about base interface is removed somehow
-2. Add a full log with deleted and left members list and complete reasons of deletion
+2. Add a full log with deleted and left members list and detailed reasons of deletion
