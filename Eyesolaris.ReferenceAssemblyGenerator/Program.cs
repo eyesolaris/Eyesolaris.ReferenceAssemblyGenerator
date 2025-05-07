@@ -453,6 +453,15 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                     p--;
                 }
             }
+            // Now process all inner types
+            IList<TypeDef> innerTypes = type.NestedTypes;
+            for (int i = 0; i < innerTypes.Count; i++)
+            {
+                TypeDef innerType = innerTypes[i];
+                TypeConfiguration? innerTypeConfig = null;
+                config?.InnerTypeConfiguration.TryGetValue(innerType.Name, out innerTypeConfig);
+                ExecuteStripping(innerType, innerTypeConfig, removedTypes, makeReferenceAssembly);
+            }
         }
 
         private static void ProcessInnerTypes(TypeDef type, IReadOnlyDictionary<string, TypeConfiguration>? config, ISet<string> removedTypes, bool? removeObsolete)
@@ -548,7 +557,8 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                 {
                     TypeDef type = types[i];
                     TypeConfiguration? typeConfig = null;
-                    bool checkForDeletion = !config.TypeConfiguration.TryGetValue(type.FullName, out typeConfig);
+                    bool checkForDeletion;
+                    checkForDeletion = !config.TypeConfiguration.TryGetValue(type.FullName, out typeConfig);
                     if (checkForDeletion)
                     {
                         if (((type.IsNotPublic
