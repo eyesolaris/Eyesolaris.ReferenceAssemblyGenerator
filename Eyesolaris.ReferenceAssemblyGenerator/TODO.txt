@@ -1,0 +1,2 @@
+﻿1. Fix a bug: when trying to remove an interface implementation with some base interfaces itself, some traces
+of interface to remove are left, AND some information about base interface is removed somehow

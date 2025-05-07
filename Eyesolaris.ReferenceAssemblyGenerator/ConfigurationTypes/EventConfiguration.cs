@@ -1,4 +1,4 @@
-﻿namespace Eyesolaris.ReferenceAssemblyGenerator
+﻿namespace Eyesolaris.ReferenceAssemblyGenerator.ConfigurationTypes
 {
     internal class EventConfiguration
     {

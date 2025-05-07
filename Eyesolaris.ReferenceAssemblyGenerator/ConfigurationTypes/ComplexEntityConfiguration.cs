@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Text.Json.Serialization;
 
-namespace Eyesolaris.ReferenceAssemblyGenerator
+namespace Eyesolaris.ReferenceAssemblyGenerator.ConfigurationTypes
 {
     internal abstract class ComplexEntityConfiguration : IJsonOnDeserialized
     {
@@ -11,7 +11,7 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
 
         public void OnDeserialized()
         {
-            if (Mode < ReferenceAssemblyGenerator.Mode.Keep || Mode > ReferenceAssemblyGenerator.Mode.Remove)
+            if (Mode < ConfigurationTypes.Mode.Keep || Mode > ConfigurationTypes.Mode.Remove)
             {
                 throw new InvalidOperationException("Mode is invalid");
             }

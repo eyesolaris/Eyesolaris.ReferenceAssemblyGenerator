@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace Eyesolaris.ReferenceAssemblyGenerator
+namespace Eyesolaris.ReferenceAssemblyGenerator.ConfigurationTypes
 {
     internal class Configuration
     {

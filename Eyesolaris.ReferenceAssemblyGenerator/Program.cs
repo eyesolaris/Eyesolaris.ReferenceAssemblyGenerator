@@ -1,5 +1,6 @@
 ﻿using dnlib.DotNet;
 using dnlib.DotNet.Emit;
+using Eyesolaris.ReferenceAssemblyGenerator.ConfigurationTypes;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -508,6 +509,10 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                     assembly.Version = new Version(rename.NewVersion);
                 }
             }
+            if (config.MakeReferenceAssembly)
+            {
+                assembly.CustomAttributes.RemoveAll("System.Runtime.CompilerServices.InternalsVisibleToAttribute");
+            }
             bool removeObsoleteValue = config.RemoveObsolete ?? Configuration.DEFAULT_REMOVE_OBSOLETE;
             foreach (var module in assembly.Modules)
             {
@@ -518,6 +523,25 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
                     null);
                 HashSet<string> removedTypes = new();
                 IList<TypeDef> types = module.Types;
+
+                // Zero pass: execute basic stripping
+                if (config.RemoveTypeForwards && module.HasExportedTypes)
+                {
+                    List<int> exportsToRemove = [];
+                    IList<ExportedType> exportedTypes = module.ExportedTypes;
+                    for (int i = 0; i < exportedTypes.Count; i++)
+                    {
+                        ExportedType type = exportedTypes[i];
+                        if (type.MovedToAnotherAssembly)
+                        {
+                            exportsToRemove.Add(i);
+                        }
+                    }
+                    foreach (int index in exportsToRemove.OrderDescending())
+                    {
+                        exportedTypes.RemoveAt(index);
+                    }
+                }
 
                 // First pass: process all types, including inner types
                 for (int i = 0; i < types.Count; i++)
@@ -598,10 +622,9 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
 
             string sharedPath = Path.Combine(DEFAULT_DOTNET_PATH, SHARED_DIR);
 
-            // First, fulfill the basic stripping
-
+            // First, execute the basic stripping
             string configRaw = File.ReadAllText("config.json");
-            Configuration? configuration = JsonSerializer.Deserialize<Configuration>(configRaw);
+            Configuration? configuration = JsonSerializer.Deserialize<Configuration>(configRaw, new JsonSerializerOptions() { ReadCommentHandling = JsonCommentHandling.Skip });
             if (configuration is null)
             {
                 throw new InvalidOperationException("Config is null");
@@ -609,19 +632,30 @@ namespace Eyesolaris.ReferenceAssemblyGenerator
 
             foreach (var kv in configuration.Assemblies)
             {
-                AssemblyResolver assemblyResolver = new AssemblyResolver();
+                AssemblyResolver assemblyResolver = new();
                 assemblyResolver.PreSearchPaths.Add("refs");
                 assemblyResolver.PreSearchPaths.Add("libs");
-                ModuleContext ctx = new ModuleContext(assemblyResolver, new Resolver(assemblyResolver));
+                ModuleContext ctx = new(assemblyResolver, new Resolver(assemblyResolver));
                 string fileName = kv.Key + ".dll";
-                AssemblyDef assembly = AssemblyDef.Load(Path.Combine("refs", fileName), ctx);
+                AssemblyDef assembly;
+                try
+                {
+                    assembly = AssemblyDef.Load(Path.Combine("refs", fileName), ctx);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Can't load assembly file '{fileName}'. Exception:");
+                    Console.Error.WriteLine(ex);
+                    Console.Error.WriteLine();
+                    continue;
+                }
                 if (assembly.TryGetOriginalTargetFrameworkAttribute(out string? framework, out Version? version, out string? profile))
                 {
                     if (framework == ".NETCoreApp")
                     {
                         assemblyResolver.UseGAC = false;
 
-                        string GetActualVersionDir(string frameworkDir, Version frameworkVersion)
+                        static string GetActualVersionDir(string frameworkDir, Version frameworkVersion)
                         {
                             string searchPattern = $"{frameworkVersion.Major}.{frameworkVersion.Minor}*";
 
